@@ -1,0 +1,21 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/find_leads",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/send_tests",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/check_inbox",
+      "schedule": "0 */2 * * *"
+    }
+  ],
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 30
+    }
+  }
+}
