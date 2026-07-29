@@ -72,28 +72,6 @@ def _to_csv(metrics: dict) -> str:
     return buffer.getvalue()
 
 
-def handler(request):
-    query_format = None
-    try:
-        query_format = request.args.get("format")  # selon le runtime Vercel utilisé
-    except AttributeError:
-        pass
-
-    with get_session() as session:
-        metrics = _build_metrics(session)
-
-    if query_format == "csv":
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "text/csv",
-                "Content-Disposition": "attachment; filename=audit_dashboard.csv",
-            },
-            "body": _to_csv(metrics),
-        }
-
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(metrics, ensure_ascii=False),
-    }
+# Note : le routage HTTP est géré par api/index.py (point d'entrée unique
+# FastAPI exigé par le runtime Python Vercel). Ce module n'expose plus que
+# des fonctions utilitaires (_build_metrics, _to_csv), importées depuis là.

@@ -167,11 +167,5 @@ def run() -> dict:
     return {"agencies_created": created}
 
 
-# --- Handler Vercel (format simple WSGI-like attendu par le runtime Python) ---
-def handler(request):
-    result = run()
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": result,
-    }
+# Note : le routage HTTP est géré par api/index.py (point d'entrée unique
+# FastAPI exigé par le runtime Python Vercel), qui appelle run() ci-dessus.
