@@ -5,6 +5,7 @@ planning échelonné (jours non successifs) et la rotation des 3 adresses
 émettrices.
 """
 import logging
+import os
 from datetime import datetime, timezone
 
 from lib.db import get_session
@@ -16,6 +17,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MAX_AGENCIES_PER_RUN = 20  # borne pour rester < 30s d'exécution serverless
+
+# Plafond de NOUVEAUX premiers contacts (test 1) envoyés par jour, pour étaler
+# le volume sur la semaine et préserver la réputation des 3 adresses d'envoi.
+# Les tests 2/3 (relances d'agences déjà en cours) ne sont pas concernés.
+NEW_AGENCY_DAILY_CAP = int(os.environ.get("NEW_AGENCY_DAILY_CAP", "3"))
 
 
 def _property_for_test(session, agency: Agency, test_index: int) -> dict | None:
@@ -62,6 +68,7 @@ def _due_test_index(agency: Agency, existing_tests: list[Audit], now: datetime) 
 def run() -> dict:
     now = datetime.now(timezone.utc)
     sent_count = 0
+    new_contacts_today = 0
 
     with get_session() as session:
         agencies = (
@@ -76,6 +83,12 @@ def run() -> dict:
             test_index = _due_test_index(agency, existing_tests, now)
 
             if test_index is None:
+                continue
+
+            if test_index == 1 and new_contacts_today >= NEW_AGENCY_DAILY_CAP:
+                # Plafond quotidien de nouveaux contacts atteint : cette agence
+                # sera reprise automatiquement au prochain run (elle reste
+                # PENDING/IN_PROGRESS, sa date planifiée est déjà passée).
                 continue
 
             prop = _property_for_test(session, agency, test_index)
@@ -121,9 +134,15 @@ def run() -> dict:
 
             agency.audit_status = AuditStatus.IN_PROGRESS
             sent_count += 1
+            if test_index == 1:
+                new_contacts_today += 1
 
-    logger.info("send_tests terminé : %d emails envoyés.", sent_count)
-    return {"tests_sent": sent_count}
+    logger.info(
+        "send_tests terminé : %d emails envoyés (%d nouveaux contacts).",
+        sent_count,
+        new_contacts_today,
+    )
+    return {"tests_sent": sent_count, "new_contacts": new_contacts_today}
 
 
 # Note : le routage HTTP est géré par api/index.py (point d'entrée unique

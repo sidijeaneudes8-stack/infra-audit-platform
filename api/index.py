@@ -9,11 +9,13 @@ api/cron/*.py), qui exposent chacun une fonction run()/_build_metrics().
 import json
 import logging
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from api.dashboard import _build_metrics, _to_csv
 from api.cron import check_inbox, find_leads, send_tests
+from api.cron.send_tests import NEW_AGENCY_DAILY_CAP
+from api.agencies_import import import_agencies
 from lib.db import get_session
 
 logging.basicConfig(level=logging.INFO)
@@ -202,6 +204,11 @@ def _dashboard_html(metrics: dict) -> str:
   .copy-btn.copied {{ background: #22c55e; border-color: #22c55e; color: #0b0d12; }}
   .panel-head-row {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }}
   .panel-head-row h2 {{ margin: 0; }}
+  textarea#import-input {{
+    width: 100%; min-height: 140px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    font-family: ui-monospace, monospace; font-size: 12px; resize: vertical;
+  }}
 </style>
 </head>
 <body>
@@ -241,6 +248,28 @@ def _dashboard_html(metrics: dict) -> str:
     <div class="panel">
       <h2>Activité récente</h2>
       {timeline_html}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Importer des agences</h2>
+    <div class="muted" style="margin-bottom:12px;">
+      Colle un tableau JSON d'agences (nom, email, site, jusqu'à 3 biens). Elles seront testées automatiquement
+      selon le planning habituel (max {NEW_AGENCY_DAILY_CAP} nouveaux contacts/jour, pour préserver la réputation des adresses d'envoi).
+    </div>
+    <textarea id="import-input" placeholder='[
+  {{
+    "name": "BARNES Paris 8e",
+    "public_email": "contact@barnes-paris8.com",
+    "catalog_url": "https://...",
+    "properties": [
+      {{"property_title": "Duplex 180m² vue Tour Eiffel", "property_url": "https://...", "property_price": "3 200 000 €"}}
+    ]
+  }}
+]'></textarea>
+    <div style="margin-top:10px; display:flex; align-items:center; gap:12px;">
+      <button class="copy-btn" onclick="importAgencies(this)">Importer</button>
+      <span id="import-status" class="muted"></span>
     </div>
   </div>
 
@@ -327,6 +356,50 @@ def _dashboard_html(metrics: dict) -> str:
       navigator.clipboard.writeText(text).then(() => flashCopied(btn));
     }}
 
+    async function importAgencies(btn) {{
+      const statusEl = document.getElementById('import-status');
+      const raw = document.getElementById('import-input').value.trim();
+      if (!raw) {{
+        statusEl.textContent = 'Colle un JSON avant d\\'importer.';
+        return;
+      }}
+
+      let parsed;
+      try {{
+        parsed = JSON.parse(raw);
+      }} catch (e) {{
+        statusEl.textContent = 'JSON invalide : ' + e.message;
+        return;
+      }}
+
+      btn.disabled = true;
+      statusEl.textContent = 'Import en cours...';
+
+      try {{
+        const res = await fetch('/api/agencies/import', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(parsed),
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          statusEl.textContent = 'Erreur : ' + (data.error || res.statusText);
+        }} else {{
+          statusEl.textContent = `${{data.agencies_created}} agence(s) créée(s), ${{data.duplicates_skipped}} doublon(s) ignoré(s).`;
+          if (data.errors && data.errors.length) {{
+            statusEl.textContent += ' Erreurs : ' + data.errors.join(' | ');
+          }}
+          if (data.agencies_created > 0) {{
+            setTimeout(() => location.reload(), 1800);
+          }}
+        }}
+      }} catch (e) {{
+        statusEl.textContent = 'Erreur réseau : ' + e.message;
+      }} finally {{
+        btn.disabled = false;
+      }}
+    }}
+
     new Chart(document.getElementById('latencyChart'), {{
       type: 'bar',
       data: {{
@@ -385,6 +458,18 @@ def dashboard(format: str | None = Query(default=None)):
         )
 
     return JSONResponse(content=json.loads(json.dumps(metrics, ensure_ascii=False)))
+
+
+@app.post("/api/agencies/import")
+async def agencies_import(request: Request):
+    body = await request.json()
+    if not isinstance(body, list):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Le corps doit être un tableau JSON d'agences."},
+        )
+    result = import_agencies(body)
+    return JSONResponse(content=result)
 
 
 @app.get("/api/cron/find_leads")
