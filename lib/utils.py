@@ -27,15 +27,28 @@ def random_user_agent() -> str:
     return random.choice(USER_AGENTS)
 
 
-# Offsets en jours pour les 3 tests, garantissant des jours non successifs
-# (test 1 -> jour 1, test 2 -> jour 4, test 3 -> jour 9)
-STAGGER_OFFSETS_DAYS = [1, 4, 9]
+def _next_business_day(d: datetime) -> datetime:
+    """Avance la date au prochain jour ouvré si elle tombe un week-end
+    (samedi -> lundi, dimanche -> lundi). Un agent immobilier n'est pas
+    testé sur sa réactivité hors jours ouvrés."""
+    while d.weekday() >= 5:  # 5 = samedi, 6 = dimanche
+        d += timedelta(days=1)
+    return d
 
 
 def compute_test_schedule(base_date: datetime | None = None) -> list[datetime]:
-    """Retourne les 3 dates d'envoi planifiées, non successives."""
+    """Retourne les 3 dates d'envoi planifiées, sur 3 jours ouvrés proches
+    (J+1, J+2, J+3 par défaut), en sautant les week-ends. Un agent
+    immobilier haut de gamme doit rester réactif sur une semaine de
+    travail normale : un écart de plusieurs jours entre les tests
+    n'aurait pas de sens pour ce protocole."""
     base_date = base_date or datetime.now(timezone.utc)
-    return [base_date + timedelta(days=offset) for offset in STAGGER_OFFSETS_DAYS]
+    dates = []
+    current = base_date
+    for _ in range(3):
+        current = _next_business_day(current + timedelta(days=1))
+        dates.append(current)
+    return dates
 
 
 def get_sender_credentials(index: int) -> tuple[str, str]:
