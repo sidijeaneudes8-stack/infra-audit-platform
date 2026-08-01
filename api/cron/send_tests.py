@@ -21,7 +21,7 @@ MAX_AGENCIES_PER_RUN = 20  # borne pour rester < 30s d'exécution serverless
 # Plafond de NOUVEAUX premiers contacts (test 1) envoyés par jour, pour étaler
 # le volume sur la semaine et préserver la réputation des 3 adresses d'envoi.
 # Les tests 2/3 (relances d'agences déjà en cours) ne sont pas concernés.
-NEW_AGENCY_DAILY_CAP = int(os.environ.get("NEW_AGENCY_DAILY_CAP", "3"))
+NEW_AGENCY_DAILY_CAP = int(os.environ.get("NEW_AGENCY_DAILY_CAP", "20"))
 
 
 def _property_for_test(session, agency: Agency, test_index: int) -> dict | None:
