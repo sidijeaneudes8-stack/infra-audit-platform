@@ -6,9 +6,12 @@ CSV téléchargeable (rapport détaillé, usage interne / import Notion, Excel..
 import csv
 import io
 import json
+from datetime import datetime, timezone
 
 from lib.db import get_session
-from models.schema import Agency, Audit, TestStatus
+from models.schema import Agency, Audit, ProspectingStatus, TestStatus
+
+RELANCE_DUE_AFTER_DAYS = 5
 
 
 def _quality_label(audit: Audit) -> str:
@@ -129,8 +132,21 @@ def _build_metrics(session) -> dict:
                 }
             )
 
+        days_since_contact = None
+        if agency.last_contact_at:
+            delta = datetime.now(timezone.utc) - agency.last_contact_at
+            days_since_contact = delta.days
+
+        relance_due = (
+            agency.prospecting_status in (ProspectingStatus.EN_COURS, ProspectingStatus.APPELE, ProspectingStatus.RELANCE_1)
+            and days_since_contact is not None
+            and days_since_contact >= RELANCE_DUE_AFTER_DAYS
+            and agency.relance_count < 2
+        )
+
         agency_reports.append(
             {
+                "id": agency.id,
                 "name": agency.name,
                 "public_email": agency.public_email,
                 "catalog_url": agency.catalog_url,
@@ -140,7 +156,17 @@ def _build_metrics(session) -> dict:
                 "ignored_rate": round(agency_ignored_rate, 1),
                 "avg_latency": round(agency_avg_latency, 1) if agency_avg_latency is not None else None,
                 "tests": tests,
+                "prospecting_status": agency.prospecting_status.value if agency.prospecting_status else "NON_CONTACTEE",
+                "relance_count": agency.relance_count or 0,
+                "days_since_contact": days_since_contact,
+                "relance_due": relance_due,
             }
+        )
+
+    pipeline_summary = {}
+    for status in ProspectingStatus:
+        pipeline_summary[status.value] = sum(
+            1 for ag in agency_reports if ag["prospecting_status"] == status.value
         )
 
     return {
@@ -158,6 +184,7 @@ def _build_metrics(session) -> dict:
         },
         "audits_detail": audits_detail,
         "agency_reports": agency_reports,
+        "pipeline_summary": pipeline_summary,
     }
 
 
