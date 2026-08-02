@@ -17,7 +17,7 @@ from lib.email_parser import (
     get_body_text,
     get_received_at,
 )
-from models.schema import Audit, TestStatus
+from models.schema import Agency, Audit, AuditStatus, ProspectingStatus, TestStatus
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -118,8 +118,37 @@ def _expire_stale_tests(session) -> int:
     return expired
 
 
+def _finalize_completed_agencies(session) -> int:
+    """Passe une agence en COMPLETED dès que son test 3 a une issue connue
+    (répondu ou expiré), et déclenche automatiquement la prospection en la
+    faisant passer en 'EN_COURS' si elle n'a pas encore été contactée.
+    Corrige un bug où audit_status restait bloqué sur IN_PROGRESS à vie."""
+    agencies = (
+        session.query(Agency)
+        .filter(Agency.audit_status == AuditStatus.IN_PROGRESS)
+        .all()
+    )
+
+    finalized = 0
+    for agency in agencies:
+        test3 = (
+            session.query(Audit)
+            .filter(Audit.agency_id == agency.id, Audit.test_index == 3)
+            .first()
+        )
+        if test3 is None or test3.test_status == TestStatus.SENT:
+            continue  # test 3 pas encore envoyé ou toujours en attente de réponse
+
+        agency.audit_status = AuditStatus.COMPLETED
+        if agency.prospecting_status == ProspectingStatus.NON_CONTACTEE:
+            agency.prospecting_status = ProspectingStatus.EN_COURS
+        finalized += 1
+
+    return finalized
+
+
 def run() -> dict:
-    total_stats = {"processed": 0, "auto": 0, "human": 0, "expired": 0}
+    total_stats = {"processed": 0, "auto": 0, "human": 0, "expired": 0, "finalized": 0}
 
     with get_session() as session:
         for index in (1, 2, 3):
@@ -129,6 +158,7 @@ def run() -> dict:
             total_stats["human"] += stats["human"]
 
         total_stats["expired"] = _expire_stale_tests(session)
+        total_stats["finalized"] = _finalize_completed_agencies(session)
 
     logger.info("check_inbox terminé : %s", total_stats)
     return total_stats
