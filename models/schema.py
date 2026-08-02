@@ -36,6 +36,16 @@ class AuditStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
 
 
+class ProspectingStatus(str, enum.Enum):
+    NON_CONTACTEE = "NON_CONTACTEE"      # audit pas encore terminé
+    EN_COURS = "EN_COURS"                # audit terminé, prospection à démarrer (auto)
+    APPELE = "APPELE"                    # premier contact effectué
+    RELANCE_1 = "RELANCE_1"
+    RELANCE_2 = "RELANCE_2"
+    SIGNEE = "SIGNEE"
+    PERDUE = "PERDUE"
+
+
 class TestStatus(str, enum.Enum):
     SENT = "SENT"
     RESPONDED_HUMAN = "RESPONDED_HUMAN"
@@ -56,6 +66,16 @@ class Agency(Base):
         default=AuditStatus.PENDING,
     )
     created_at = Column(DateTime(timezone=True), default=_now)
+
+    # --- Suivi commercial (prospection), géré depuis le dashboard ---
+    prospecting_status = Column(
+        SAEnum(ProspectingStatus, name="prospecting_status_enum"),
+        nullable=False,
+        default=ProspectingStatus.NON_CONTACTEE,
+    )
+    last_contact_at = Column(DateTime(timezone=True), nullable=True)
+    relance_count = Column(Integer, nullable=False, default=0)
+    prospecting_notes = Column(Text, nullable=True)
 
     audits = relationship("Audit", back_populates="agency", cascade="all, delete-orphan")
     properties = relationship("Property", back_populates="agency", cascade="all, delete-orphan")
