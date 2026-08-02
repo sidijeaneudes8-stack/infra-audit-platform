@@ -16,6 +16,7 @@ from api.dashboard import _build_metrics, _to_csv
 from api.cron import check_inbox, find_leads, send_tests
 from api.cron.send_tests import NEW_AGENCY_DAILY_CAP
 from api.agencies_import import import_agencies
+from api.prospecting import apply_prospecting_action
 from lib.db import get_session
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,25 @@ QUALITY_COLORS = {
     "—": "#64748b",
 }
 
+PROSPECTING_LABELS = {
+    "NON_CONTACTEE": "Audit en cours",
+    "EN_COURS": "Prospection à démarrer",
+    "APPELE": "Appelé",
+    "RELANCE_1": "Relance 1 faite",
+    "RELANCE_2": "Relance 2 faite",
+    "SIGNEE": "Signée",
+    "PERDUE": "Perdue",
+}
+PROSPECTING_COLORS = {
+    "NON_CONTACTEE": "#64748b",
+    "EN_COURS": "#3b82f6",
+    "APPELE": "#eab308",
+    "RELANCE_1": "#f97316",
+    "RELANCE_2": "#f97316",
+    "SIGNEE": "#22c55e",
+    "PERDUE": "#ef4444",
+}
+
 
 def _fmt_dt(iso_str: str | None) -> str:
     if not iso_str:
@@ -56,6 +76,7 @@ def _dashboard_html(metrics: dict) -> str:
     detail = metrics["audits_detail"]
     breakdown = metrics["response_breakdown"]
     agency_reports = metrics["agency_reports"]
+    pipeline_summary = metrics.get("pipeline_summary", {})
 
     rows_html = "".join(
         f"""
@@ -111,6 +132,20 @@ def _dashboard_html(metrics: dict) -> str:
 
     agency_reports_json = json.dumps(agency_reports, ensure_ascii=False)
 
+    def _pipeline_chip(k: str, v: int) -> str:
+        color = PROSPECTING_COLORS.get(k, "#64748b")
+        label = PROSPECTING_LABELS.get(k, k)
+        return f"<span class='pipeline-chip' style='border-color:{color}55;color:{color}'>{label} : {v}</span>"
+
+    pipeline_bar_html = "".join(
+        _pipeline_chip(k, v) for k, v in pipeline_summary.items() if v > 0
+    ) or "<span class='muted'>Aucune agence en pipeline pour le moment.</span>"
+
+    def _prospecting_badge(status: str) -> str:
+        color = PROSPECTING_COLORS.get(status, "#64748b")
+        label = PROSPECTING_LABELS.get(status, status)
+        return f"<span class='badge' style='background:{color}22;color:{color};border:1px solid {color}55'>{label}</span>"
+
     agency_cards_html = "".join(
         f"""
         <div class="agency-card">
@@ -122,7 +157,7 @@ def _dashboard_html(metrics: dict) -> str:
             <button class="copy-btn" onclick="copyAgency({i}, this)">Copier</button>
           </div>
           <div class="agency-stats">
-            <span>{ag['tests_sent']}/{3} tests</span>
+            <span>{ag['tests_sent']}/3 tests</span>
             <span>·</span>
             <span>{ag['human_response_rate']}% humain</span>
             <span>·</span>
@@ -130,6 +165,19 @@ def _dashboard_html(metrics: dict) -> str:
             <span>·</span>
             <span>{ag['ignored_rate']}% ignoré</span>
           </div>
+          <div class="prospecting-row">
+            {_prospecting_badge(ag['prospecting_status'])}
+            {"<span class='relance-alert'>⚠ Relance à faire (" + str(ag['days_since_contact']) + "j sans nouvelle)</span>" if ag['relance_due'] else ""}
+          </div>
+          {(
+            f'''<div class="prospecting-actions">
+              <button class="action-btn" onclick="prospectAction('{ag['id']}', 'appele', this)">Appelé</button>
+              <button class="action-btn" onclick="prospectAction('{ag['id']}', 'relance', this)" {"disabled" if ag['relance_count'] >= 2 else ""}>Relance ({ag['relance_count']}/2)</button>
+              <button class="action-btn action-btn-success" onclick="prospectAction('{ag['id']}', 'signee', this)">Signée</button>
+              <button class="action-btn action-btn-danger" onclick="prospectAction('{ag['id']}', 'perdue', this)">Perdue</button>
+            </div>'''
+            if ag['prospecting_status'] not in ("NON_CONTACTEE", "SIGNEE", "PERDUE") else ""
+          )}
         </div>
         """
         for i, ag in enumerate(agency_reports)
@@ -209,6 +257,19 @@ def _dashboard_html(metrics: dict) -> str:
     border: 1px solid var(--border); border-radius: 8px; padding: 10px;
     font-family: ui-monospace, monospace; font-size: 12px; resize: vertical;
   }}
+  .pipeline-bar {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+  .pipeline-chip {{ border: 1px solid; border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 600; }}
+  .prospecting-row {{ margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+  .relance-alert {{ color: #f97316; font-size: 12px; font-weight: 600; }}
+  .prospecting-actions {{ margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }}
+  .action-btn {{
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 10px; font-size: 11px; cursor: pointer;
+  }}
+  .action-btn:hover {{ border-color: var(--accent); color: var(--accent); }}
+  .action-btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+  .action-btn-success:hover {{ border-color: #22c55e; color: #22c55e; }}
+  .action-btn-danger:hover {{ border-color: #ef4444; color: #ef4444; }}
 </style>
 </head>
 <body>
@@ -279,6 +340,11 @@ def _dashboard_html(metrics: dict) -> str:
       <thead><tr><th>Agence</th><th>Latence moy. (min)</th><th>Taux ignoré</th></tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
+  </div>
+
+  <div class="panel">
+    <h2>Pipeline commercial</h2>
+    <div class="pipeline-bar">{pipeline_bar_html}</div>
   </div>
 
   <div class="panel">
@@ -400,6 +466,28 @@ def _dashboard_html(metrics: dict) -> str:
       }}
     }}
 
+    async function prospectAction(agencyId, action, btn) {{
+      const original = btn.textContent;
+      btn.disabled = true;
+      try {{
+        const res = await fetch(`/api/agencies/${{agencyId}}/prospecting`, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ action }}),
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          alert('Erreur : ' + (data.error || res.statusText));
+          btn.disabled = false;
+          return;
+        }}
+        location.reload();
+      }} catch (e) {{
+        alert('Erreur réseau : ' + e.message);
+        btn.disabled = false;
+      }}
+    }}
+
     new Chart(document.getElementById('latencyChart'), {{
       type: 'bar',
       data: {{
@@ -469,6 +557,16 @@ async def agencies_import(request: Request):
             content={"error": "Le corps doit être un tableau JSON d'agences."},
         )
     result = import_agencies(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/agencies/{agency_id}/prospecting")
+async def agencies_prospecting(agency_id: str, request: Request):
+    body = await request.json()
+    action = body.get("action", "")
+    result = apply_prospecting_action(agency_id, action)
+    if "error" in result:
+        return JSONResponse(status_code=400, content=result)
     return JSONResponse(content=result)
 
 
