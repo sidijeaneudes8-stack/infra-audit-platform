@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from api.dashboard import _build_metrics, _to_csv
 from api.cron import check_inbox, find_leads, send_tests
-from api.cron.send_tests import NEW_AGENCY_DAILY_CAP
+from api.cron.send_tests import NEW_AGENCY_DAILY_CAP, send_now_exception
 from api.agencies_import import import_agencies, delete_agency
 from api.prospecting import apply_prospecting_action
 from lib.db import get_session
@@ -333,9 +333,17 @@ def _dashboard_html(metrics: dict) -> str:
     ]
   }}
 ]'></textarea>
-    <div style="margin-top:10px; display:flex; align-items:center; gap:12px;">
+    <div style="margin-top:10px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       <button class="copy-btn" onclick="importAgencies(this)">Importer</button>
       <span id="import-status" class="muted"></span>
+    </div>
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <div class="muted" style="margin-bottom:8px;">
+        <strong style="color:#f97316;">Exception ponctuelle</strong> — envoie le test 1 immédiatement pour toutes les agences en attente,
+        sans attendre le prochain lundi/mercredi/vendredi. À utiliser seulement si le lot n'a pas pu être préparé à temps.
+      </div>
+      <button class="copy-btn copy-btn-danger" onclick="sendNowException(this)">Envoyer maintenant (exception)</button>
+      <span id="send-now-status" class="muted"></span>
     </div>
   </div>
 
@@ -471,6 +479,33 @@ def _dashboard_html(metrics: dict) -> str:
       }}
     }}
 
+    async function sendNowException(btn) {{
+      if (!confirm("Envoyer le test 1 MAINTENANT à toutes les agences en attente, sans attendre le prochain lundi/mercredi/vendredi ? À réserver aux cas exceptionnels.")) {{
+        return;
+      }}
+      const statusEl = document.getElementById('send-now-status');
+      btn.disabled = true;
+      statusEl.textContent = 'Envoi en cours...';
+      try {{
+        const res = await fetch('/api/agencies/send-now-exception', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{}}),
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          statusEl.textContent = 'Erreur : ' + (data.error || res.statusText);
+        }} else {{
+          statusEl.textContent = `${{data.tests_sent_now}} test(s) envoyé(s) immédiatement.` + (data.skipped_by_cap > 0 ? ` ${{data.skipped_by_cap}} agence(s) reportée(s) (plafond atteint).` : '');
+          setTimeout(() => location.reload(), 1800);
+        }}
+      }} catch (e) {{
+        statusEl.textContent = 'Erreur réseau : ' + e.message;
+      }} finally {{
+        btn.disabled = false;
+      }}
+    }}
+
     async function deleteAgency(agencyId, name, btn) {{
       if (!confirm(`Supprimer définitivement "${{name}}" et tous ses tests ? Cette action est irréversible.`)) {{
         return;
@@ -582,6 +617,18 @@ async def agencies_import(request: Request):
             content={"error": "Le corps doit être un tableau JSON d'agences."},
         )
     result = import_agencies(body)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/agencies/send-now-exception")
+async def agencies_send_now(request: Request):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        pass
+    agency_ids = body.get("agency_ids") if isinstance(body, dict) else None
+    result = send_now_exception(agency_ids)
     return JSONResponse(content=result)
 
 
