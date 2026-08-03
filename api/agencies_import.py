@@ -14,6 +14,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def delete_agency(agency_id: str) -> dict:
+    """Supprime une agence et tout ce qui lui est rattaché (biens, tests) —
+    cascade gérée par le modèle SQLAlchemy."""
+    with get_session() as session:
+        agency = session.query(Agency).filter(Agency.id == agency_id).first()
+        if agency is None:
+            return {"error": "Agence introuvable."}
+        name = agency.name
+        session.delete(agency)
+        session.flush()
+        return {"deleted": True, "name": name}
+
+
 def import_agencies(payload: list[dict]) -> dict:
     created = 0
     skipped = 0
