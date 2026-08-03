@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from api.dashboard import _build_metrics, _to_csv
 from api.cron import check_inbox, find_leads, send_tests
 from api.cron.send_tests import NEW_AGENCY_DAILY_CAP
-from api.agencies_import import import_agencies
+from api.agencies_import import import_agencies, delete_agency
 from api.prospecting import apply_prospecting_action
 from lib.db import get_session
 
@@ -154,7 +154,10 @@ def _dashboard_html(metrics: dict) -> str:
               <strong>{ag['name']}</strong>
               <div class="muted">{ag['public_email']}</div>
             </div>
-            <button class="copy-btn" onclick="copyAgency({i}, this)">Copier</button>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="copy-btn" onclick="copyAgency({i}, this)">Copier</button>
+              <button class="copy-btn copy-btn-danger" onclick="deleteAgency('{ag['id']}', '{ag['name'].replace("'", "\\'")}', this)">Supprimer</button>
+            </div>
           </div>
           <div class="agency-stats">
             <span>{ag['tests_sent']}/3 tests</span>
@@ -250,6 +253,8 @@ def _dashboard_html(metrics: dict) -> str:
   }}
   .copy-btn:hover {{ background: var(--accent); color: #0b0d12; }}
   .copy-btn.copied {{ background: #22c55e; border-color: #22c55e; color: #0b0d12; }}
+  .copy-btn-danger {{ border-color: #ef4444; color: #ef4444; }}
+  .copy-btn-danger:hover {{ background: #ef4444; color: #0b0d12; }}
   .panel-head-row {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }}
   .panel-head-row h2 {{ margin: 0; }}
   textarea#import-input {{
@@ -466,6 +471,26 @@ def _dashboard_html(metrics: dict) -> str:
       }}
     }}
 
+    async function deleteAgency(agencyId, name, btn) {{
+      if (!confirm(`Supprimer définitivement "${{name}}" et tous ses tests ? Cette action est irréversible.`)) {{
+        return;
+      }}
+      btn.disabled = true;
+      try {{
+        const res = await fetch(`/api/agencies/${{agencyId}}`, {{ method: 'DELETE' }});
+        const data = await res.json();
+        if (!res.ok) {{
+          alert('Erreur : ' + (data.error || res.statusText));
+          btn.disabled = false;
+          return;
+        }}
+        location.reload();
+      }} catch (e) {{
+        alert('Erreur réseau : ' + e.message);
+        btn.disabled = false;
+      }}
+    }}
+
     async function prospectAction(agencyId, action, btn) {{
       const original = btn.textContent;
       btn.disabled = true;
@@ -557,6 +582,14 @@ async def agencies_import(request: Request):
             content={"error": "Le corps doit être un tableau JSON d'agences."},
         )
     result = import_agencies(body)
+    return JSONResponse(content=result)
+
+
+@app.delete("/api/agencies/{agency_id}")
+async def agencies_delete(agency_id: str):
+    result = delete_agency(agency_id)
+    if "error" in result:
+        return JSONResponse(status_code=404, content=result)
     return JSONResponse(content=result)
 
 
