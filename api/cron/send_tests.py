@@ -82,11 +82,19 @@ def _send_one_test(session, agency: Agency, test_index: int, now: datetime) -> b
         )
         return False
 
-    inquiry_text = generate_inquiry(
-        prop["property_ref"], prop["property_title"], prop["property_url"]
-    )
-
-    sender_email, sender_password = get_sender_credentials(test_index)
+    try:
+        inquiry_text = generate_inquiry(
+            prop["property_ref"], prop["property_title"], prop["property_url"]
+        )
+        sender_email, sender_password = get_sender_credentials(test_index)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Échec préparation (génération IA ou credentials) pour %s (test %d): %s",
+            agency.name,
+            test_index,
+            exc,
+        )
+        return False
 
     try:
         send_email_smtp(
