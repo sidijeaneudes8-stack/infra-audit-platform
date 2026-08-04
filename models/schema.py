@@ -112,6 +112,7 @@ class Audit(Base):
     property_ref = Column(String, nullable=True)
     property_title = Column(String, nullable=True)
     property_url = Column(String, nullable=True)
+    property_price = Column(String, nullable=True)
 
     sender_email = Column(String, nullable=False)
     inquiry_text = Column(Text, nullable=True)
