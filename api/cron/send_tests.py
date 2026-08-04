@@ -52,6 +52,7 @@ def _property_for_test(session, agency: Agency, test_index: int) -> dict | None:
         "property_ref": prop.property_ref or f"REF-{test_index}",
         "property_title": prop.property_title,
         "property_url": prop.property_url or agency.catalog_url or "",
+        "property_price": prop.property_price,
         "_row": prop,
     }
 
@@ -114,6 +115,7 @@ def _send_one_test(session, agency: Agency, test_index: int, now: datetime) -> b
         property_ref=prop["property_ref"],
         property_title=prop["property_title"],
         property_url=prop["property_url"],
+        property_price=prop["property_price"],
         sender_email=sender_email,
         inquiry_text=inquiry_text,
         sent_at=now,
