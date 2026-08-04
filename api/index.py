@@ -628,7 +628,11 @@ async def agencies_send_now(request: Request):
     except Exception:  # noqa: BLE001
         pass
     agency_ids = body.get("agency_ids") if isinstance(body, dict) else None
-    result = send_now_exception(agency_ids)
+    try:
+        result = send_now_exception(agency_ids)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Erreur inattendue dans send_now_exception: %s", exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
     return JSONResponse(content=result)
 
 
