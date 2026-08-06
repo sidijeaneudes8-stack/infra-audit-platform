@@ -345,6 +345,14 @@ def _dashboard_html(metrics: dict) -> str:
       <button class="copy-btn copy-btn-danger" onclick="sendNowException(this)">Envoyer maintenant (exception)</button>
       <span id="send-now-status" class="muted"></span>
     </div>
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <div class="muted" style="margin-bottom:8px;">
+        <strong style="color:#3b82f6;">Relève manuelle</strong> — contourne la limite d'1 relève/jour du plan gratuit : relit tout de suite
+        les 3 boîtes mail pour détecter les réponses reçues, sans attendre le prochain passage automatique.
+      </div>
+      <button class="copy-btn" style="border-color:#3b82f6;color:#3b82f6;" onclick="checkInboxNow(this)">Relever les réponses maintenant</button>
+      <span id="check-inbox-status" class="muted"></span>
+    </div>
   </div>
 
   <div class="panel">
@@ -498,6 +506,26 @@ def _dashboard_html(metrics: dict) -> str:
         }} else {{
           statusEl.textContent = `${{data.tests_sent_now}} test(s) envoyé(s) immédiatement.` + (data.skipped_by_cap > 0 ? ` ${{data.skipped_by_cap}} agence(s) reportée(s) (plafond atteint).` : '');
           setTimeout(() => location.reload(), 1800);
+        }}
+      }} catch (e) {{
+        statusEl.textContent = 'Erreur réseau : ' + e.message;
+      }} finally {{
+        btn.disabled = false;
+      }}
+    }}
+
+    async function checkInboxNow(btn) {{
+      const statusEl = document.getElementById('check-inbox-status');
+      btn.disabled = true;
+      statusEl.textContent = 'Relève en cours (peut prendre 10-20s)...';
+      try {{
+        const res = await fetch('/api/cron/check_inbox', {{ method: 'POST' }});
+        const data = await res.json();
+        if (!res.ok) {{
+          statusEl.textContent = 'Erreur : ' + (data.error || res.statusText);
+        }} else {{
+          statusEl.textContent = `${{data.processed}} message(s) lu(s) — ${{data.human}} humaine(s), ${{data.auto}} auto, ${{data.expired}} expiré(s), ${{data.finalized}} audit(s) finalisé(s).`;
+          setTimeout(() => location.reload(), 2000);
         }}
       }} catch (e) {{
         statusEl.textContent = 'Erreur réseau : ' + e.message;
@@ -671,5 +699,9 @@ def cron_send_tests():
 @app.get("/api/cron/check_inbox")
 @app.post("/api/cron/check_inbox")
 def cron_check_inbox():
-    result = check_inbox.run()
+    try:
+        result = check_inbox.run()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Erreur inattendue dans check_inbox.run(): %s", exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
     return JSONResponse(content=result)
