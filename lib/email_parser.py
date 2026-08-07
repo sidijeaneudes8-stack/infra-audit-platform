@@ -33,8 +33,8 @@ SUBJECT_AUTO_PATTERNS = [
 _SUBJECT_RE = re.compile("|".join(SUBJECT_AUTO_PATTERNS), re.IGNORECASE)
 
 
-def connect_imap(host: str, port: int, user: str, password: str) -> imaplib.IMAP4_SSL:
-    conn = imaplib.IMAP4_SSL(host, port)
+def connect_imap(host: str, port: int, user: str, password: str, timeout: int = 15) -> imaplib.IMAP4_SSL:
+    conn = imaplib.IMAP4_SSL(host, port, timeout=timeout)
     conn.login(user, password)
     return conn
 
