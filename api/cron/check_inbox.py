@@ -44,6 +44,8 @@ def _match_audit(session, to_sender_email: str, from_agency_email: str) -> Audit
 
 
 def _process_mailbox(session, index: int) -> dict:
+    import time
+
     email_addr = os.environ.get(f"SENDER_EMAIL_{index}")
     password = os.environ.get(f"SENDER_PASSWORD_{index}")
     if not email_addr or not password:
@@ -52,23 +54,31 @@ def _process_mailbox(session, index: int) -> dict:
 
     stats = {"processed": 0, "auto": 0, "human": 0}
 
+    t0 = time.monotonic()
+    logger.info("[boîte %d] Connexion IMAP à %s...", index, email_addr)
     try:
         conn = connect_imap(IMAP_HOST, IMAP_PORT, email_addr, password)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Connexion IMAP échouée pour %s : %s", email_addr, exc)
+        logger.error("[boîte %d] Connexion IMAP échouée pour %s : %s (après %.1fs)", index, email_addr, exc, time.monotonic() - t0)
         return stats
+    logger.info("[boîte %d] Connexion IMAP réussie en %.1fs", index, time.monotonic() - t0)
 
+    t1 = time.monotonic()
     try:
         messages = fetch_unseen_messages(conn)
+        logger.info("[boîte %d] %d message(s) non lu(s) trouvé(s) en %.1fs", index, len(messages), time.monotonic() - t1)
     finally:
         conn.logout()
 
-    for msg in messages:
+    for i, msg in enumerate(messages):
+        t2 = time.monotonic()
         stats["processed"] += 1
         from_addr = _extract_from(msg)
+        logger.info("[boîte %d] Message %d/%d de %s", index, i + 1, len(messages), from_addr)
 
         audit = _match_audit(session, email_addr, from_addr)
         if not audit:
+            logger.info("[boîte %d] Message %d : aucun audit correspondant, ignoré.", index, i + 1)
             continue
 
         # Étape 1 : filtrage déterministe, zéro coût API
@@ -77,12 +87,15 @@ def _process_mailbox(session, index: int) -> dict:
             audit.received_at = get_received_at(msg)
             audit.is_human_response = False
             stats["auto"] += 1
+            logger.info("[boîte %d] Message %d : auto-réponse détectée (filtre local).", index, i + 1)
             continue
 
         # Étape 2 : classification Groq
         body = get_body_text(msg)
         received_at = get_received_at(msg)
+        t3 = time.monotonic()
         is_human = classify_response(body)
+        logger.info("[boîte %d] Message %d : classification Groq en %.1fs -> %s", index, i + 1, time.monotonic() - t3, "humain" if is_human else "auto")
 
         audit.response_text = body
         audit.received_at = received_at
@@ -95,6 +108,8 @@ def _process_mailbox(session, index: int) -> dict:
         else:
             audit.test_status = TestStatus.RESPONDED_AUTO
             stats["auto"] += 1
+
+        logger.info("[boîte %d] Message %d traité en %.1fs (total)", index, i + 1, time.monotonic() - t2)
 
     return stats
 
