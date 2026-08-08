@@ -8,7 +8,7 @@ import logging
 import re
 from email.message import Message
 from email.utils import parsedate_to_datetime
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,15 @@ def connect_imap(host: str, port: int, user: str, password: str, timeout: int = 
     return conn
 
 
-def fetch_unseen_messages(conn: imaplib.IMAP4_SSL, mailbox: str = "INBOX"):
-    """Récupère les messages non lus et les retourne comme objets email.message.Message."""
+def fetch_recent_messages(conn: imaplib.IMAP4_SSL, mailbox: str = "INBOX", days: int = 10):
+    """Récupère les messages des N derniers jours, qu'ils aient été lus ou
+    non. Ouvrir un email pour le consulter le marque automatiquement comme
+    "lu" côté Gmail — se baser sur UNSEEN le rendrait invisible pour
+    toujours. La déduplication (ne pas retraiter un audit déjà résolu) est
+    gérée en base, pas via le statut lu/non lu de la boîte mail."""
     conn.select(mailbox)
-    status, data = conn.search(None, "UNSEEN")
+    since_date = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+    status, data = conn.search(None, f'(SINCE "{since_date}")')
     if status != "OK":
         return []
 
