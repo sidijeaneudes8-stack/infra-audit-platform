@@ -12,7 +12,7 @@ from lib.ai_validator import calculate_latency, classify_response, is_expired
 from lib.db import get_session
 from lib.email_parser import (
     connect_imap,
-    fetch_unseen_messages,
+    fetch_recent_messages,
     filter_auto_replies,
     get_body_text,
     get_received_at,
@@ -65,8 +65,8 @@ def _process_mailbox(session, index: int) -> dict:
 
     t1 = time.monotonic()
     try:
-        messages = fetch_unseen_messages(conn)
-        logger.info("[boîte %d] %d message(s) non lu(s) trouvé(s) en %.1fs", index, len(messages), time.monotonic() - t1)
+        messages = fetch_recent_messages(conn)
+        logger.info("[boîte %d] %d message(s) récent(s) trouvé(s) en %.1fs", index, len(messages), time.monotonic() - t1)
     finally:
         conn.logout()
 
